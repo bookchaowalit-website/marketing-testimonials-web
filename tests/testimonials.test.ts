@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createQuote, featuredEmbedHtml, MAX_AUTHOR, MAX_QUOTE, parseQuotes, visibleQuotes, type Quote } from "./testimonials";
+import { createQuote, featuredEmbedHtml, MAX_AUTHOR, MAX_QUOTE, parseQuotes, visibleQuotes, type Quote } from "@/lib/testimonials";
 
 const quotes: Quote[] = [
   { id: "a", author: "Ann", quote: "Solid work", state: "Review" },
