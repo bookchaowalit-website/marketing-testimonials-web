@@ -51,7 +51,7 @@ export default function Home() {
         <div className="proof-grid">
           {visible.length === 0 ? <p className="empty-tray">No proof found in this exposure.</p> : visible.map((item, index) => (
             <article className={`proof ${item.state.toLowerCase()}`} key={item.id}>
-              <div className="proof-top"><span>FRAME {String(index + 1).padStart(2, "0")}</span><button type="button" aria-label={`Delete testimonial by ${item.author}`} onClick={() => setQuotes((current) => current.filter((entry) => entry.id !== item.id))}>REMOVE</button></div>
+              <div className="proof-top"><span>FRAME {String(index + 1).padStart(2, "0")}</span><button type="button" aria-label={`Remove testimonial by ${item.author}`} onClick={() => setQuotes((current) => current.filter((entry) => entry.id !== item.id))}>REMOVE</button></div>
               <blockquote>“{item.quote}”</blockquote><div className="proof-foot"><strong>{item.author}</strong><label><span className="sr-only">State for quote by {item.author}</span><select className="proof-state" value={item.state} onChange={(event) => restate(item.id, event.target.value as State)}>{STATES.map((option) => <option key={option}>{option}</option>)}</select></label></div>
             </article>
           ))}
