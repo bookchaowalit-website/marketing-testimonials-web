@@ -6,7 +6,10 @@ import { createQuote, featuredEmbedHtml, MAX_AUTHOR, MAX_QUOTE, parseQuotes, STA
 import { useStoredState } from "@/lib/use-stored-state";
 
 type ListFilter = "All" | State;
-type Removed = { quote: Quote; index: number; viaKeyboard: boolean };
+// index: where it sat in the stored list when removed. nextShown / prevShown: the rows shown around it, for focus.
+type RemovedEntry = { quote: Quote; index: number; nextShown?: string; prevShown?: string };
+type RemovedBatch = { items: RemovedEntry[]; viaKeyboard: boolean };
+const removedLabel = (items: RemovedEntry[]) => (items.length === 1 ? `Removed the quote from ${items[0].quote.author}` : `Removed ${items.length} quotes`);
 type Draft = { author: string; quote: string; state: State };
 
 // A sample, not a testimonial: nobody said this. It starts in Review so it never reaches the embed by itself.
@@ -30,7 +33,11 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const [removed, setRemoved] = useState<Removed | null>(null);
+  // Every removal still inside the Undo window: one Undo puts them all back where they were.
+  const [removed, setRemovedState] = useState<RemovedBatch | null>(null);
+  // The latest batch, so two removals before a re-render still both land in it.
+  const removedRef = useRef<RemovedBatch | null>(null);
+  const setRemoved = (batch: RemovedBatch | null) => { removedRef.current = batch; setRemovedState(batch); };
   const [toastFocused, setToastFocused] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [embedNotice, setEmbedNotice] = useState("");
@@ -39,6 +46,7 @@ export default function Home() {
   const searchRef = useRef<HTMLInputElement>(null);
   const undoRef = useRef<HTMLButtonElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
+  const focusRowsNext = useRef<string[] | null>(null);
   const wasComposing = useRef(false);
   const inList = useMemo(() => (list === "All" ? quotes : quotes.filter((item) => item.state === list)), [quotes, list]);
   const visible = useMemo(() => visibleQuotes(inList, query), [inList, query]);
@@ -51,11 +59,22 @@ export default function Home() {
     else if (wasComposing.current) newRef.current?.focus();
     wasComposing.current = composing;
   }, [composing]);
+  // A removal made from the keyboard moves focus to Undo (the focused Remove button has just gone).
   useEffect(() => { if (removed?.viaKeyboard) undoRef.current?.focus(); }, [removed]);
-  // The Undo toast closes 6 s after a removal, but never while it holds focus.
+  // When the toast closes after Undo or Escape, focus goes back near the removed row once the list has re-rendered:
+  // the first of these rows still shown, else New quote (or the composer's first field when it is open).
+  useEffect(() => {
+    const ids = focusRowsNext.current;
+    if (removed || !ids) return;
+    focusRowsNext.current = null;
+    const shown = [...document.querySelectorAll<HTMLElement>(".as-row[data-quote]")];
+    const row = ids.map((id) => shown.find((entry) => entry.dataset.quote === id)).find(Boolean);
+    (row?.querySelector<HTMLButtonElement>(".as-danger") ?? newRef.current ?? authorRef.current)?.focus();
+  }, [removed, quotes]);
+  // The Undo toast closes 6 s after the latest removal (each removal restarts it), but never while it holds focus.
   useEffect(() => {
     if (!removed || toastFocused) return;
-    const timer = window.setTimeout(() => setRemoved(null), 6000);
+    const timer = window.setTimeout(() => { removedRef.current = null; setRemovedState(null); }, 6000);
     return () => window.clearTimeout(timer);
   }, [removed, toastFocused]);
   // While the toast shows, the page reserves its height so nothing focusable stays hidden under it.
@@ -89,17 +108,32 @@ export default function Home() {
     const index = quotes.findIndex((entry) => entry.id === item.id);
     if (index < 0) return;
     setQuotes((current) => current.filter((entry) => entry.id !== item.id));
-    setRemoved({ quote: item, index, viaKeyboard });
-    setAnnouncement(`Removed the quote from ${item.author}. Undo is available for a few seconds.`);
+    const shownAt = visible.findIndex((entry) => entry.id === item.id);
+    const entry: RemovedEntry = { quote: item, index, nextShown: visible[shownAt + 1]?.id, prevShown: shownAt > 0 ? visible[shownAt - 1].id : undefined };
+    const items = [...(removedRef.current?.items ?? []), entry];
+    setRemoved({ items, viaKeyboard });
+    setAnnouncement(`${removedLabel(items)}. Undo is available for a few seconds.`);
+  }
+
+  function closeToast(focusIds?: string[]) {
+    const last = removedRef.current?.items.at(-1);
+    // Dismissed: the row after the removed one, else the one before it.
+    focusRowsNext.current = focusIds ?? [last?.nextShown, last?.prevShown].filter((id): id is string => Boolean(id));
+    setRemoved(null);
+    setToastFocused(false);
   }
 
   function undo() {
-    if (!removed) return;
-    const { quote, index } = removed;
-    setQuotes((current) => (current.some((entry) => entry.id === quote.id) ? current : [...current.slice(0, index), quote, ...current.slice(index)]));
-    setAnnouncement(`Restored the quote from ${quote.author}.`);
-    setRemoved(null);
-    setToastFocused(false);
+    const items = removedRef.current?.items;
+    if (!items?.length) return;
+    // Latest removal first, so each index refers to the list as it was just before that removal.
+    setQuotes((current) => items.reduceRight(
+      (list, { quote, index }) => (list.some((entry) => entry.id === quote.id) ? list : [...list.slice(0, index), quote, ...list.slice(index)]),
+      current,
+    ));
+    setAnnouncement(items.length === 1 ? `Restored the quote from ${items[0].quote.author}.` : `Restored ${items.length} quotes.`);
+    // Undone: back to the restored row (the latest one, where the user was last).
+    closeToast([items[items.length - 1].quote.id]);
   }
 
   async function copyEmbed() {
@@ -179,7 +213,7 @@ export default function Home() {
           {visible.length ? (
             <ul className="as-list" aria-label={title}>
               {visible.map((item) => (
-                <li className="as-row" key={item.id}>
+                <li className="as-row" key={item.id} data-quote={item.id}>
                   <div>
                     <h3>{item.author}</h3>
                     <p className="tm-quote">“{item.quote}”</p>
@@ -242,10 +276,10 @@ export default function Home() {
           aria-label="Undo remove"
           onFocus={() => setToastFocused(true)}
           onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setToastFocused(false); }}
-          onKeyDown={(event) => { if (event.key === "Escape") { setRemoved(null); setToastFocused(false); } }}
+          onKeyDown={(event) => { if (event.key === "Escape") closeToast(); }}
         >
-          <span>Removed the quote from {removed.quote.author}</span>
-          <button ref={undoRef} type="button" className="as-plain" onClick={undo}>Undo</button>
+          <span>{removedLabel(removed.items)}</span>
+          <button ref={undoRef} type="button" className="as-plain" onClick={undo} aria-label={removed.items.length === 1 ? undefined : `Undo remove of ${removed.items.length} quotes`}>Undo</button>
         </div>
       ) : null}
 

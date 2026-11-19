@@ -108,4 +108,39 @@ describe("lists, search, state and remove", () => {
     act(() => { $(".as-toast")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect($(".as-toast")).toBeNull();
   });
+
+  it("consecutive removes restore together with one Undo, each in its place", () => {
+    addQuote("Ann", "First real words.");
+    addQuote("Ben", "Second real words.");
+    const before = rows();
+    expect(before).toEqual(["Ben", "Ann", "Sample client"]);
+    vi.useFakeTimers();
+    press($('[aria-label="Remove the quote from Ann"]')!);
+    act(() => { vi.advanceTimersByTime(4000); });
+    press($('[aria-label="Remove the quote from Ben"]')!);
+    expect(rows()).toEqual(["Sample client"]);
+    expect($(".as-toast span")?.textContent).toBe("Removed 2 quotes");
+    expect(button("Undo").getAttribute("aria-label")).toBe("Undo remove of 2 quotes");
+    // The second removal restarted the 6 s window.
+    act(() => { vi.advanceTimersByTime(4000); });
+    press(button("Undo"));
+    expect(rows()).toEqual(before);
+    expect($('[role="status"]')?.textContent).toBe("Restored 2 quotes.");
+    expect($(".as-toast")).toBeNull();
+  });
+
+  it("keyboard remove focuses Undo; Undo focuses the restored quote, Escape the next one", () => {
+    addQuote("Ann", "First real words.");
+    press($('[aria-label="Remove the quote from Ann"]')!, 0);
+    expect(document.activeElement).toBe(button("Undo"));
+    press(button("Undo"), 0);
+    expect(document.activeElement).toBe($('[aria-label="Remove the quote from Ann"]'));
+    press($('[aria-label="Remove the quote from Ann"]')!, 0);
+    act(() => { $(".as-toast")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(document.activeElement).toBe($('[aria-label="Remove the quote from Sample client"]'));
+    // Nothing left to land on: New quote.
+    press($('[aria-label="Remove the quote from Sample client"]')!, 0);
+    act(() => { $(".as-toast")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(document.activeElement).toBe(button("New quote"));
+  });
 });
