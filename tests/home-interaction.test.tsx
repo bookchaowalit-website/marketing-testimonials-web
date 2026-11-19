@@ -1,0 +1,111 @@
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Home from "@/app/page";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root;
+let host: HTMLDivElement;
+const $ = <T extends Element = HTMLElement>(selector: string) => host.querySelector(selector) as T | null;
+const button = (text: string, scope: ParentNode = host) => [...scope.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith(text)) as HTMLButtonElement;
+const rows = () => [...host.querySelectorAll(".as-row h3")].map((h) => h.textContent);
+const press = (el: Element, detail = 1) => act(() => { el.dispatchEvent(new MouseEvent("click", { bubbles: true, detail })); });
+function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  act(() => {
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+function pick(el: HTMLSelectElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+function addQuote(author: string, quote: string, state?: string) {
+  press(button("New quote"));
+  type($<HTMLInputElement>(".as-composer input")!, author);
+  type($<HTMLTextAreaElement>(".as-composer textarea")!, quote);
+  if (state) press(button(state, $(".as-composer")!));
+  act(() => { $<HTMLFormElement>(".as-composer")!.requestSubmit(); });
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root.render(<Home />));
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.useRealTimers();
+});
+
+describe("composer and embed", () => {
+  it("adds a Featured quote, which appears in the embed and copies", async () => {
+    press(button("New quote"));
+    expect(document.activeElement).toBe($(".as-composer input"));
+    expect(button("Add", $(".as-composer")!).disabled).toBe(true);
+    press(button("Cancel"));
+    addQuote("Dana, Studio K", "Clear plan, on time.", "Featured");
+    expect(rows()[0]).toBe("Dana, Studio K");
+    expect(document.activeElement?.textContent).toContain("New quote");
+    const embed = $<HTMLTextAreaElement>(".tm-embed textarea")!.value;
+    expect(embed).toContain("<figcaption>Dana, Studio K</figcaption>");
+    expect(embed).not.toContain("Sample client");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await act(async () => { button("Copy embed HTML").click(); });
+    expect(writeText).toHaveBeenCalledWith(embed);
+    expect($(".tm-embed-actions")!.textContent).toContain("Copied");
+    writeText.mockRejectedValueOnce(new Error("blocked"));
+    await act(async () => { button("Copy embed HTML").click(); });
+    expect($(".tm-embed-actions")!.textContent).toContain("Copy is blocked");
+  });
+
+  it("a whitespace-only quote is refused with a message", () => {
+    addQuote("Dana", "   ");
+    expect($('[role="status"].as-sr')!.textContent).toContain("Add both an author and a quote");
+  });
+});
+
+describe("lists, search, state and remove", () => {
+  it("changes state, moves the quote between lists, and shows per-list empty states", () => {
+    pick($<HTMLSelectElement>(".tm-state select")!, "Archive");
+    expect($(".as-row .as-pill")!.textContent).toBe("Archive");
+    press(button("Archive", $(".as-side")!));
+    expect(rows()).toEqual(["Sample client"]);
+    press(button("Featured", $(".as-side")!));
+    expect($(".as-empty")!.textContent).toContain("No Featured quotes");
+  });
+
+  it("search has its own empty state with Clear search", () => {
+    type($<HTMLInputElement>(".as-search input")!, "zzz");
+    expect($(".as-empty")!.textContent).toContain("Nothing matches");
+    press(button("Clear search"));
+    expect(rows()).toEqual(["Sample client"]);
+  });
+
+  it("Remove offers Undo; the toast closes on its own and on Escape", () => {
+    vi.useFakeTimers();
+    press(button("Remove"), 0);
+    expect($(".as-empty")!.textContent).toContain("No quotes yet");
+    expect(document.activeElement?.textContent).toBe("Undo");
+    press(button("Undo"));
+    expect(rows()).toEqual(["Sample client"]);
+    press(button("Remove"));
+    act(() => { vi.advanceTimersByTime(6100); });
+    expect($(".as-toast")).toBeNull();
+  });
+
+  it("Escape closes the toast", () => {
+    press(button("Remove"), 0);
+    act(() => { $(".as-toast")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect($(".as-toast")).toBeNull();
+  });
+});

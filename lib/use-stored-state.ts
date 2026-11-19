@@ -1,39 +1,58 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
-/**
- * State mirrored to localStorage. The first render always uses `initial` so the
- * server and client markup match; the stored value is read after mount and run
- * through `parse`, which should return null for missing or invalid data.
- * Pass a stable (module-level) `parse` function.
- */
+// State mirrored to localStorage through useSyncExternalStore: the server render and the first client render use
+// `initial` (no hydration mismatch), then the stored value is read. `parse` must return null for missing or invalid
+// data and should be a stable module-level function. Copied per repository (no shared package).
+
+const listeners = new Set<() => void>();
+const cache = new Map<string, { raw: string | null; value: unknown }>();
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
+function readRaw(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export function useStoredState<T>(key: string, initial: T, parse: (raw: string | null) => T | null) {
-  const [value, setValue] = useState<T>(initial);
-  const [ready, setReady] = useState(false);
+  const getSnapshot = useCallback(() => {
+    const raw = readRaw(key);
+    const hit = cache.get(key);
+    if (hit && hit.raw === raw) return hit.value as T;
+    const value = parse(raw) ?? initial;
+    cache.set(key, { raw, value });
+    return value;
+  }, [key, initial, parse]);
 
-  useEffect(() => {
-    let stored: T | null = null;
-    try {
-      stored = parse(window.localStorage.getItem(key));
-    } catch {
-      stored = null;
-    }
-    // Hydrating from browser-only storage after mount is the intended use of this effect.
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (stored !== null) setValue(stored);
-    setReady(true);
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [key, parse]);
+  const value = useSyncExternalStore(subscribe, getSnapshot, () => initial);
 
-  useEffect(() => {
-    if (!ready) return;
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Storage can be full or blocked (private mode); the in-memory state still works.
-    }
-  }, [key, value, ready]);
+  const setValue = useCallback(
+    (next: T | ((current: T) => T)) => {
+      const resolved = typeof next === "function" ? (next as (current: T) => T)(getSnapshot()) : next;
+      const raw = JSON.stringify(resolved);
+      try {
+        window.localStorage.setItem(key, raw);
+        cache.set(key, { raw, value: resolved });
+      } catch {
+        // Storage blocked or full: keep the value in memory for this page view.
+        cache.set(key, { raw: readRaw(key), value: resolved });
+      }
+      for (const listener of listeners) listener();
+    },
+    [key, getSnapshot],
+  );
 
-  return [value, setValue, ready] as const;
+  return [value, setValue] as const;
 }
