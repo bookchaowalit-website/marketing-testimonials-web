@@ -6,8 +6,9 @@ import { createQuote, featuredEmbedHtml, MAX_AUTHOR, MAX_QUOTE, parseQuotes, STA
 import { useStoredState } from "@/lib/use-stored-state";
 
 type ListFilter = "All" | State;
-// index: where it sat in the stored list when removed. nextShown / prevShown: the rows shown around it, for focus.
-type RemovedEntry = { quote: Quote; index: number; nextShown?: string; prevShown?: string };
+// index: where it sat in the stored list when removed; before / after: the ids stored either side of it then, so Undo
+// puts it back between the same quotes even after new ones were added. nextShown / prevShown: the rows shown around it, for focus.
+type RemovedEntry = { quote: Quote; index: number; before?: string; after?: string; nextShown?: string; prevShown?: string };
 type RemovedBatch = { items: RemovedEntry[]; viaKeyboard: boolean };
 const removedLabel = (items: RemovedEntry[]) => (items.length === 1 ? `Removed the quote from ${items[0].quote.author}` : `Removed ${items.length} quotes`);
 type Draft = { author: string; quote: string; state: State };
@@ -47,6 +48,8 @@ export default function Home() {
   const undoRef = useRef<HTMLButtonElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
   const focusRowsNext = useRef<string[] | null>(null);
+  // A state change that takes its row out of the open list: focus the state control of the first of these rows still shown, else the list.
+  const focusStateNext = useRef<string[] | null>(null);
   const wasComposing = useRef(false);
   const inList = useMemo(() => (list === "All" ? quotes : quotes.filter((item) => item.state === list)), [quotes, list]);
   const visible = useMemo(() => visibleQuotes(inList, query), [inList, query]);
@@ -71,6 +74,14 @@ export default function Home() {
     const row = ids.map((id) => shown.find((entry) => entry.dataset.quote === id)).find(Boolean);
     (row?.querySelector<HTMLButtonElement>(".as-danger") ?? newRef.current ?? authorRef.current)?.focus();
   }, [removed, quotes]);
+  useEffect(() => {
+    const ids = focusStateNext.current;
+    if (!ids) return;
+    focusStateNext.current = null;
+    const shown = [...document.querySelectorAll<HTMLElement>(".as-row[data-quote]")];
+    const row = ids.map((id) => shown.find((entry) => entry.dataset.quote === id)).find(Boolean);
+    (row?.querySelector<HTMLSelectElement>(".tm-state select") ?? document.querySelector<HTMLButtonElement>('.as-lists button[aria-current="true"]'))?.focus();
+  }, [quotes]);
   // The Undo toast closes 6 s after the latest removal (each removal restarts it), but never while it holds focus.
   useEffect(() => {
     if (!removed || toastFocused) return;
@@ -100,6 +111,10 @@ export default function Home() {
   }
 
   function restate(item: Quote, state: State) {
+    if (list !== "All" && state !== list) {
+      const shownAt = visible.findIndex((entry) => entry.id === item.id);
+      focusStateNext.current = [visible[shownAt + 1]?.id, shownAt > 0 ? visible[shownAt - 1].id : undefined].filter((id): id is string => Boolean(id));
+    }
     setQuotes((current) => current.map((entry) => (entry.id === item.id ? { ...entry, state } : entry)));
     setAnnouncement(`The quote from ${item.author} is now ${state}.`);
   }
@@ -109,7 +124,7 @@ export default function Home() {
     if (index < 0) return;
     setQuotes((current) => current.filter((entry) => entry.id !== item.id));
     const shownAt = visible.findIndex((entry) => entry.id === item.id);
-    const entry: RemovedEntry = { quote: item, index, nextShown: visible[shownAt + 1]?.id, prevShown: shownAt > 0 ? visible[shownAt - 1].id : undefined };
+    const entry: RemovedEntry = { quote: item, index, before: quotes[index - 1]?.id, after: quotes[index + 1]?.id, nextShown: visible[shownAt + 1]?.id, prevShown: shownAt > 0 ? visible[shownAt - 1].id : undefined };
     const items = [...(removedRef.current?.items ?? []), entry];
     setRemoved({ items, viaKeyboard });
     setAnnouncement(`${removedLabel(items)}. Undo is available for a few seconds.`);
@@ -126,11 +141,15 @@ export default function Home() {
   function undo() {
     const items = removedRef.current?.items;
     if (!items?.length) return;
-    // Latest removal first, so each index refers to the list as it was just before that removal.
-    setQuotes((current) => items.reduceRight(
-      (list, { quote, index }) => (list.some((entry) => entry.id === quote.id) ? list : [...list.slice(0, index), quote, ...list.slice(index)]),
-      current,
-    ));
+    // Latest removal first, so each neighbour refers to the list as it was just before that removal. Back after the
+    // quote it followed, else before the one it preceded, else at its old index (quotes added meanwhile keep their place).
+    setQuotes((current) => items.reduceRight((list, { quote, index, before, after }) => {
+      if (list.some((entry) => entry.id === quote.id)) return list;
+      const prev = before ? list.findIndex((entry) => entry.id === before) : -1;
+      const next = after ? list.findIndex((entry) => entry.id === after) : -1;
+      const at = prev >= 0 ? prev + 1 : next >= 0 ? next : Math.min(index, list.length);
+      return [...list.slice(0, at), quote, ...list.slice(at)];
+    }, current));
     setAnnouncement(items.length === 1 ? `Restored the quote from ${items[0].quote.author}.` : `Restored ${items.length} quotes.`);
     // Undone: back to the restored row (the latest one, where the user was last).
     closeToast([items[items.length - 1].quote.id]);

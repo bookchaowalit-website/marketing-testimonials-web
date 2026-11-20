@@ -144,3 +144,51 @@ describe("lists, search, state and remove", () => {
     expect(document.activeElement).toBe(button("New quote"));
   });
 });
+
+describe("2026-11-19 review", () => {
+  function remount(stored: unknown) {
+    act(() => root.unmount());
+    localStorage.setItem("testimonials-v2", JSON.stringify(stored));
+    root = createRoot(host);
+    act(() => root.render(<Home />));
+  }
+  const alex = { id: "alex", author: "Alex", quote: "Shipped faster than expected.", state: "Featured" };
+
+  it("drops the old Alex sample from an upgraded browser but keeps every quote the user added", () => {
+    remount([{ id: "q1", author: "Dana", quote: "Real words.", state: "Featured" }, alex]);
+    expect(rows()).toEqual(["Dana"]);
+    expect($<HTMLTextAreaElement>(".tm-embed textarea")!.value).not.toContain("Alex");
+  });
+
+  it("an upgraded browser holding only the old sample gets the labelled sample instead", () => {
+    remount([alex]);
+    expect(rows()).toEqual(["Sample client"]);
+    expect($(".tm-embed textarea")).toBeNull();
+  });
+
+  it("Undo puts a quote back next to its old neighbours, after quotes added meanwhile", () => {
+    addQuote("Ann", "First real words.");
+    addQuote("Ben", "Second real words.");
+    expect(rows()).toEqual(["Ben", "Ann", "Sample client"]);
+    press($('[aria-label="Remove the quote from Ben"]')!);
+    addQuote("Cy", "Third real words.");
+    press(button("Undo"));
+    expect(rows()).toEqual(["Cy", "Ben", "Ann", "Sample client"]);
+  });
+
+  it("a state change that takes the row out of the open list moves focus to the next row, then to the list", () => {
+    addQuote("Ann", "First real words.", "Featured");
+    addQuote("Ben", "Second real words.", "Featured");
+    press([...host.querySelectorAll<HTMLButtonElement>(".as-lists button")].find((b) => b.textContent?.startsWith("Featured"))!);
+    expect(rows()).toEqual(["Ben", "Ann"]);
+    const ben = $<HTMLSelectElement>('[aria-label="State for the quote from Ben"]')!;
+    act(() => ben.focus());
+    pick(ben, "Review");
+    expect(rows()).toEqual(["Ann"]);
+    const ann = $<HTMLSelectElement>('[aria-label="State for the quote from Ann"]')!;
+    expect(document.activeElement).toBe(ann);
+    pick(ann, "Archive");
+    expect(rows()).toEqual([]);
+    expect(document.activeElement).toBe($('.as-lists button[aria-current="true"]'));
+  });
+});

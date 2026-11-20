@@ -37,6 +37,11 @@ export function isState(value: unknown): value is State {
   return typeof value === "string" && (STATES as readonly string[]).includes(value);
 }
 
+// The invented quote earlier versions seeded as Featured. Browsers that ran them still hold it; it is dropped on
+// read so it never shows unlabelled or reaches the embed. Matched on id, author and words so a real quote stays.
+const LEGACY_SAMPLE = { id: "alex", author: "Alex", quote: "Shipped faster than expected." };
+const isLegacySample = (q: Record<string, unknown>) => q.id === LEGACY_SAMPLE.id && q.author === LEGACY_SAMPLE.author && q.quote === LEGACY_SAMPLE.quote;
+
 export function parseQuotes(raw: string | null): Quote[] | null {
   if (!raw) return null;
   try {
@@ -44,14 +49,18 @@ export function parseQuotes(raw: string | null): Quote[] | null {
     if (!Array.isArray(data)) return null;
     // Ids key the rows and every edit; a repeated id keeps only its first quote.
     const seen = new Set<string>();
-    return data.filter((item): item is Quote => {
+    let hadLegacySample = false;
+    const quotes = data.filter((item): item is Quote => {
       if (typeof item !== "object" || item === null) return false;
       const q = item as Record<string, unknown>;
       if (!(typeof q.id === "string" && typeof q.author === "string" && typeof q.quote === "string" && isState(q.state))) return false;
+      if (isLegacySample(q)) { hadLegacySample = true; return false; }
       if (seen.has(q.id)) return false;
       seen.add(q.id);
       return true;
     });
+    // Only the old sample was stored: start like a new visitor, with the labelled sample.
+    return hadLegacySample && quotes.length === 0 ? null : quotes;
   } catch {
     return null;
   }
