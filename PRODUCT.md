@@ -44,3 +44,11 @@ A freelancer curating a few client quotes for their own site, and a portfolio vi
 ## Boundaries
 
 - Browser-only apart from the stateless `/api/mcp` route. No server storage, no personal data collected.
+
+## Known limits
+
+- When this browser refuses to save (storage full or blocked), a quote added here is kept on screen only. If another
+  tab then saves the list, the storage event replaces this tab's unsaved quote with that tab's list, without a warning.
+  Keeping unsaved quotes apart from the saved list and merging them on sync is a larger change than this demo warrants.
+- Undo after removing every quote and adding a new one in the Undo window puts the restored quote above the new one
+  (no neighbour is left, so the old index is used).

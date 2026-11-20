@@ -192,3 +192,30 @@ describe("2026-11-19 review", () => {
     expect(document.activeElement).toBe($('.as-lists button[aria-current="true"]'));
   });
 });
+
+describe("2026-11-20 review", () => {
+  it("the sample never reaches the copied HTML, even when set to Featured", () => {
+    pick($<HTMLSelectElement>('[aria-label="State for the quote from Sample client"]')!, "Featured");
+    expect($(".tm-embed textarea")).toBeNull();
+    expect($(".tm-embed")!.textContent).toContain("No quote is Featured yet");
+    addQuote("Dana", "Real words.", "Featured");
+    const embed = $<HTMLTextAreaElement>(".tm-embed textarea")!.value;
+    expect(embed).toContain("Dana");
+    expect(embed).not.toContain("Sample client");
+  });
+
+  it("a rejected quote shows its error in the form, tied to the field, and clears on edit", () => {
+    press(button("New quote"));
+    type($<HTMLInputElement>(".as-composer input")!, "Dana");
+    const quote = $<HTMLTextAreaElement>(".as-composer textarea")!;
+    type(quote, "“”");
+    act(() => { $<HTMLFormElement>(".as-composer")!.requestSubmit(); });
+    const error = $(".as-composer .tm-error");
+    expect(error?.textContent).toBe("Add both an author and a quote before exposing it.");
+    expect(quote.getAttribute("aria-invalid")).toBe("true");
+    expect(quote.getAttribute("aria-describedby")).toContain(error!.id);
+    type(quote, "“Real”");
+    expect($(".as-composer .tm-error")).toBeNull();
+    expect(quote.getAttribute("aria-invalid")).toBeNull();
+  });
+});

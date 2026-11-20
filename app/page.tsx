@@ -33,7 +33,10 @@ export default function Home() {
   const [list, setList] = useState<ListFilter>("All");
   const [query, setQuery] = useState("");
   const [composing, setComposing] = useState(false);
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [draft, setDraftState] = useState<Draft>(EMPTY);
+  // A quote createQuote refused (e.g. only quote marks or zero-width characters): shown in the form until the next edit.
+  const [formError, setFormError] = useState("");
+  const setDraft = (next: Draft) => { setDraftState(next); setFormError(""); };
   // Every removal still inside the Undo window: one Undo puts them all back where they were.
   const [removed, setRemovedState] = useState<RemovedBatch | null>(null);
   // The latest batch, so two removals before a re-render still both land in it.
@@ -53,7 +56,8 @@ export default function Home() {
   const wasComposing = useRef(false);
   const inList = useMemo(() => (list === "All" ? quotes : quotes.filter((item) => item.state === list)), [quotes, list]);
   const visible = useMemo(() => visibleQuotes(inList, query), [inList, query]);
-  const embed = useMemo(() => featuredEmbedHtml(quotes), [quotes]);
+  // The sample is not a testimonial: it never goes into the copied HTML, whatever its state.
+  const embed = useMemo(() => featuredEmbedHtml(quotes.filter((item) => item.id !== SAMPLE_ID)), [quotes]);
   const countOf = (value: ListFilter) => (value === "All" ? quotes.length : quotes.filter((item) => item.state === value).length);
 
   // Opening the composer focuses its first field; closing it returns focus to New quote.
@@ -101,7 +105,7 @@ export default function Home() {
   function add(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const next = createQuote(draft.author, draft.quote, draft.state, createId());
-    if ("error" in next) { setAnnouncement(next.error); return; }
+    if ("error" in next) { setFormError(next.error); setAnnouncement(next.error); return; }
     setQuotes((current) => [next, ...current]);
     if (list !== "All" && list !== next.state) setList(next.state);
     setQuery("");
@@ -209,7 +213,8 @@ export default function Home() {
                 <input ref={authorRef} value={draft.author} maxLength={MAX_AUTHOR} onChange={(event) => setDraft({ ...draft, author: event.target.value })} autoComplete="off" />
               </label>
               <label className="as-field">What did they say?
-                <textarea value={draft.quote} maxLength={MAX_QUOTE} aria-describedby="quote-hint" onChange={(event) => setDraft({ ...draft, quote: event.target.value })} placeholder="A short, specific note in their words" />
+                <textarea value={draft.quote} maxLength={MAX_QUOTE} aria-invalid={formError ? true : undefined} aria-describedby={formError ? "quote-error quote-hint" : "quote-hint"} onChange={(event) => setDraft({ ...draft, quote: event.target.value })} placeholder="A short, specific note in their words" />
+                {formError ? <span id="quote-error" className="tm-error">{formError}</span> : null}
                 <span id="quote-hint" className="tm-hint">Only add words a real client said and agreed to share.</span>
               </label>
               <div className="as-composer-foot">

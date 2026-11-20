@@ -16,3 +16,4 @@ html, body { margin: 0; background: var(--as-bg); }
 .tm-embed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .tm-embed-actions span { color: var(--as-green); font-size: 14px; font-weight: 600; }
 .tm-hint { color: var(--as-muted); font-size: 13px; font-weight: 400; }
+.tm-error { color: var(--as-danger); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
